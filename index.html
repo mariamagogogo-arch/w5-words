@@ -72,7 +72,13 @@ const WordLearning = (() => {
     const words = dueWords.concat(newWords), sentences = dueSentences.concat(newSentences), ordered = [];
     while (words.length || sentences.length) { ordered.push(...words.splice(0, 3)); if (sentences.length) ordered.push(sentences.shift()); }
     const created = { date, events: [], historySince: new Date().toISOString(), unit: state.unit, queue: ordered.map(item => ({ id: item.id, retest: false, ready: 0, round: 0 })), current: null, turn: 0, done: false, results: {}, hadWork: ordered.length > 0, total: ordered.length };
-    state.sessions[date + '-u' + state.unit] = created; save(); return created;
+    const key = date + '-u' + state.unit;
+    if (state.sessions[key]) {
+      let archive = key + '-previous', suffix = 1;
+      while (state.sessions[archive]) archive = key + '-previous-' + suffix++;
+      state.sessions[archive] = state.sessions[key];
+    }
+    state.sessions[key] = created; save(); return created;
   }
   function success(task) {
     const entry = progress(task.id);
@@ -193,7 +199,7 @@ const WordLearning = (() => {
   function top(label) { return '<header class="top"><button type="button" data-action="home">‹ 首页</button><span class="eyebrow">' + label + '</span><button type="button" data-action="progress">学习记录</button></header>'; }
   function storageNotice() { return '<p class="storage">' + (saveError ? '此浏览器无法保存进度，请保持页面打开或换到允许保存数据的浏览器。' : '学习进度只保存在当前设备、当前浏览器。') + '</p>'; }
   function homeView() {
-    const entries = Object.values(state.progress), due = WORD_ITEMS.filter(item => state.progress[item.id] && state.progress[item.id].due <= date);
+    const entries = Object.values(state.progress), due = WORD_ITEMS.filter(item => (!chosenUnit || item.unit === chosenUnit) && state.progress[item.id] && state.progress[item.id].due <= date);
     const current = chosenUnit ? dailySession() : null;
     const saved = current && current.hadWork ? current : null;
     const left = WORD_ITEMS.filter(item => item.unit === state.unit && !state.progress[item.id]).length;
@@ -227,9 +233,17 @@ const WordLearning = (() => {
     const helped = results.filter(result => !result.today).length;
     return top('今天的收获') + '<section class="card"><h1>今天先记到这里。</h1>' + (!session.hadWork ? '<p class="intro">当前没有安排到期复习或新内容。可以在首页换一个单元，或等到下次复习。</p>' : '<div class="count">' + independent + '<span style="font-size:18px"> 项首次独立写对</span></div><p class="intro">穿插后无提示写对 ' + retrieved + ' 项；订正后仍待复测 ' + helped + ' 项。今天看过答案的内容，下次还会再测。</p>') + Object.keys(session.results).map(id => { const item = INDEX[id], entry = progress(id), result = session.results[id]; return '<div class="row"><div><strong>' + escape(item.zh) + '</strong><small>' + escape(item.en) + '<br>下次重点复习：' + entry.due + '</small></div><span class="status">' + (result.independent ? '首次独立写对' : result.today ? '穿插后写对' : '待复测') + '</span></div>'; }).join('') + '<p class="small">刚看过答案后写对不会增加“多日独立通过”次数。最后才订正的内容如果来不及穿插，就留到明天复测。</p>' + button('home', '完成，回首页') + '</section>';
   }
-    function dailySession() {
+  function sessionFitsUnit(saved, unit) {
+    if (!saved || saved.unit !== unit) return false;
+    const ids = [...(saved.queue || []).map(task => task.id), ...Object.keys(saved.results || {}), ...(saved.deferred || []), ...(saved.events || []).map(event => event.id).filter(Boolean)];
+    if (saved.current) ids.push(saved.current.id);
+    return ids.every(id => INDEX[id] && INDEX[id].unit === unit);
+  }
+  function dailySession() {
+    const current = state.sessions[date + '-u' + state.unit];
     const legacy = state.sessions[date];
-    return state.sessions[date + '-u' + state.unit] || (legacy && legacy.unit === state.unit ? legacy : null);
+    if (sessionFitsUnit(current, state.unit)) return current;
+    return sessionFitsUnit(legacy, state.unit) ? legacy : null;
   }
   function recordEvent(kind, detail = {}) {
     if (!session) return;
@@ -265,7 +279,8 @@ const WordLearning = (() => {
         }).join('') + '</ol>' : '<p class="small">只有结果汇总，没有逐次作答记录。</p>') + '</section>';
       }).join('');
       const milestones = events.filter(event => ['start', 'pause'].includes(event.kind)).map(event => '<li>' + escape(time(event.at)) + ' ' + (event.kind === 'start' ? '从首页进入练习' : '暂停或返回首页') + '</li>').join('');
-      return '<article class="card"><h3>Unit ' + saved.unit + ' · 自主默写与间隔复习</h3>' + summary + detailSummary + '<details><summary>查看每题作答与订正过程</summary>' + (milestones ? '<ul>' + milestones + '</ul>' : '') + details + '</details></article>';
+      const label = sessionFitsUnit(saved, saved.unit) ? 'Unit ' + saved.unit + ' · 自主默写与间隔复习' : '旧版跨单元练习 · 记录保留';
+      return '<article class="card"><h3>' + label + '</h3>' + summary + detailSummary + '<details><summary>查看每题作答与订正过程</summary>' + (milestones ? '<ul>' + milestones + '</ul>' : '') + details + '</details></article>';
     }).join('') + '</section>').join('');
     return top('按日期查看练习') + '<h1>学习记录</h1><p class="intro">看看每天练了什么、哪里写错，以及怎样订正。</p>' + button('mastery', '查看逐词掌握与复习安排', false) + '<p class="small">详细过程从本次更新后开始保存；首次默写正确率只统计实际提交的首次答案，不包含点“还不会”的内容。</p>' + (cards || '<section class="card"><p>还没有练习记录。先从首页选择一个单元开始吧。</p></section>') + storageNotice() + button('home', '返回首页选择单元');
   }
