@@ -32,7 +32,7 @@ const WordLearning = (() => {
     'hard-working': ['hard · working', '正式拼写中间要有连字符：hard-working。'],
     'ping-pong': ['ping · pong', '正式拼写中间要有连字符：ping-pong。']
   };
-  let state, date, root, page = 'home', session, saveError = false, chosenUnit = null;
+  let state, date, root, page = 'home', session, saveError = false, chosenUnit = null, practiceKind = 'word';
   const escape = value => String(value == null ? '' : value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
   function dayString(now = new Date()) { return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0'); }
   function shiftDay(value, gap) { const parts = value.split('-').map(Number); const now = new Date(parts[0], parts[1] - 1, parts[2], 12); now.setDate(now.getDate() + gap); return dayString(now); }
@@ -63,16 +63,13 @@ const WordLearning = (() => {
   }
   function plan() {
     const existing = dailySession(); if (existing) return existing;
-    const due = WORD_ITEMS.filter(item => item.unit === state.unit && state.progress[item.id] && state.progress[item.id].due <= date).sort((left, right) => state.progress[left.id].due.localeCompare(state.progress[right.id].due) || state.progress[left.id].level - state.progress[right.id].level);
-    const dueWords = due.filter(item => item.kind === 'word').slice(0, 8);
-    const dueSentences = due.filter(item => item.kind === 'sentence').slice(0, 2);
-    const unseen = WORD_ITEMS.filter(item => item.unit === state.unit && !state.progress[item.id]);
-    const newWords = unseen.filter(item => item.kind === 'word').slice(0, due.length >= 10 ? 0 : 5);
-    const newSentences = unseen.filter(item => item.kind === 'sentence').slice(0, dueSentences.length >= 2 ? 0 : 1);
-    const words = dueWords.concat(newWords), sentences = dueSentences.concat(newSentences), ordered = [];
-    while (words.length || sentences.length) { ordered.push(...words.splice(0, 3)); if (sentences.length) ordered.push(sentences.shift()); }
-    const created = { date, events: [], historySince: new Date().toISOString(), unit: state.unit, queue: ordered.map(item => ({ id: item.id, retest: false, ready: 0, round: 0 })), current: null, turn: 0, done: false, results: {}, hadWork: ordered.length > 0, total: ordered.length };
-    const key = date + '-u' + state.unit;
+    const ordered = WORD_ITEMS.filter(item => item.unit === state.unit && item.kind === practiceKind).sort((a, b) => {
+      const dueA = state.progress[a.id] && state.progress[a.id].due <= date;
+      const dueB = state.progress[b.id] && state.progress[b.id].due <= date;
+      return Number(!!dueB) - Number(!!dueA);
+    });
+    const created = { date, kind: practiceKind, events: [], historySince: new Date().toISOString(), unit: state.unit, queue: ordered.map(item => ({ id: item.id, retest: false, ready: 0, round: 0 })), current: null, turn: 0, done: false, results: {}, hadWork: ordered.length > 0, total: ordered.length };
+    const key = date + '-u' + state.unit + '-' + practiceKind;
     if (state.sessions[key]) {
       let archive = key + '-previous', suffix = 1;
       while (state.sessions[archive]) archive = key + '-previous-' + suffix++;
@@ -114,7 +111,8 @@ const WordLearning = (() => {
     session.current = Object.assign(session.queue.splice(index, 1)[0], { phase: 'test', input: '', message: '', blocked: false, attempts: 0 });
     page = 'practice';
   }
-  function begin() {
+  function begin(kind = 'word') {
+    practiceKind = kind === 'sentence' ? 'sentence' : 'word';
     session = plan();
     recordEvent('start');
     if (session.done) page = 'summary';
@@ -199,11 +197,16 @@ const WordLearning = (() => {
   function top(label) { return '<header class="top"><button type="button" data-action="home">‹ 首页</button><span class="eyebrow">' + label + '</span><button type="button" data-action="progress">学习记录</button></header>'; }
   function storageNotice() { return '<p class="storage">' + (saveError ? '此浏览器无法保存进度，请保持页面打开或换到允许保存数据的浏览器。' : '学习进度只保存在当前设备、当前浏览器。') + '</p>'; }
   function homeView() {
-    const entries = Object.values(state.progress), due = WORD_ITEMS.filter(item => (!chosenUnit || item.unit === chosenUnit) && state.progress[item.id] && state.progress[item.id].due <= date);
-    const current = chosenUnit ? dailySession() : null;
-    const saved = current && current.hadWork ? current : null;
-    const left = WORD_ITEMS.filter(item => item.unit === state.unit && !state.progress[item.id]).length;
-    return top('五上英语 · 自己记住') + '<div class="eyebrow">少量新学，及时复习</div><h1>不靠提示，<br>也能写出来。</h1><p class="intro">我会先看看你会不会。不会的陪你记，写错的帮你找原因；之后再换个时间，看看你还记不记得。</p><section class="card"><h2>今天的默写</h2><div class="row"><div><strong>先复习到期内容</strong><small>学过的先复习，再学少量新的。</small></div><span class="status">' + due.length + ' 项到期</span></div><div class="row"><div><strong>再学新词和句子</strong><small>通常最多 5 个新词（含短语）和 1 条句子；复习多时减少新学。</small></div></div>' + ('<label class="unit">先选择本次练习单元<select id="unit-select" aria-label="选择练习单元"><option value=""' + (!chosenUnit ? ' selected' : '') + '>请选择单元</option>' + [1, 2, 3, 4, 5, 6].map(unit => '<option value="' + unit + '"' + (chosenUnit === unit ? ' selected' : '') + '>Unit ' + unit + '</option>').join('') + '</select></label>') + (chosenUnit ? button('start', saved && saved.done ? '看看这个单元今天的收获' : saved && saved.current ? '继续这个单元的练习' : '开始这个单元的默写') : '<button type="button" class="primary" disabled>请先选择单元</button>') + '<p class="small">建议每次约 10–15 分钟，觉得累了可以暂停。' + (left === 0 && !saved ? '当前单元都已接触，可选择下一个单元。' : '') + '</p></section><div class="stats"><div class="card"><strong>' + entries.filter(entry => entry.level >= 3).length + '</strong><span class="small">多日独立写对</span></div><div class="card"><strong>' + entries.filter(entry => entry.level === 0).length + '</strong><span class="small">需要巩固</span></div></div>' + storageNotice();
+    const entries = Object.values(state.progress);
+    const selector = '<label class="unit">先选择本次练习单元<select id="unit-select" aria-label="选择练习单元"><option value=""' + (!chosenUnit ? ' selected' : '') + '>请选择单元</option>' + [1, 2, 3, 4, 5, 6].map(unit => '<option value="' + unit + '"' + (chosenUnit === unit ? ' selected' : '') + '>Unit ' + unit + '</option>').join('') + '</select></label>';
+    const entrances = chosenUnit ? ['word', 'sentence'].map(kind => {
+      const count = WORD_ITEMS.filter(item => item.unit === chosenUnit && item.kind === kind).length;
+      const saved = dailySession(kind), label = kind === 'word' ? '单词与短语' : '句子';
+      const action = saved && saved.done ? '查看今天的练习结果' : saved && saved.current ? '继续本次练习' : '开始全部' + label;
+      const finished = saved ? Object.keys(saved.results || {}).length : 0;
+      return '<section class="card"><h2>Unit ' + chosenUnit + ' · ' + label + '</h2><p class="intro">本入口覆盖全部 ' + count + ' 项' + (saved ? ' · 已有结果 ' + finished + '/' + count : '') + '。</p>' + button('start-' + kind, action) + '<p class="small">不会的先记清楚，再遮住答案回忆；可随时暂停，之后选择同一单元继续。</p></section>';
+    }).join('') : '<p class="intro">选择单元后，会显示“单词与短语”和“句子”两个练习入口。</p>';
+    return top('五上英语 · 按单元练习') + '<h1>选好一个单元，<br>单词、句子分开练。</h1><p class="intro">每个入口覆盖本单元全部内容，错词会订正并穿插复测。</p><section class="card"><h2>选择单元</h2>' + selector + '</section>' + entrances + '<div class="stats"><div class="card"><strong>' + entries.filter(entry => entry.level >= 3).length + '</strong><span class="small">多日独立写对</span></div><div class="card"><strong>' + entries.filter(entry => entry.level === 0).length + '</strong><span class="small">需要巩固</span></div></div>' + storageNotice();
   }
   function questionHeader(item, task) {
     return '<span class="tag">Unit ' + item.unit + ' · ' + (item.kind === 'word' ? item.en.includes(' ') ? '短语' : '单词' : '句子') + ' · ' + (task.retest ? '穿插后再测' : '先试着回忆') + '</span>' + (item.context ? '<div class="context">前一句的意思：' + escape(item.context) + '</div>' : '') + '<div class="prompt">' + escape(item.zh) + '</div>';
@@ -233,17 +236,15 @@ const WordLearning = (() => {
     const helped = results.filter(result => !result.today).length;
     return top('今天的收获') + '<section class="card"><h1>今天先记到这里。</h1>' + (!session.hadWork ? '<p class="intro">当前没有安排到期复习或新内容。可以在首页换一个单元，或等到下次复习。</p>' : '<div class="count">' + independent + '<span style="font-size:18px"> 项首次独立写对</span></div><p class="intro">穿插后无提示写对 ' + retrieved + ' 项；订正后仍待复测 ' + helped + ' 项。今天看过答案的内容，下次还会再测。</p>') + Object.keys(session.results).map(id => { const item = INDEX[id], entry = progress(id), result = session.results[id]; return '<div class="row"><div><strong>' + escape(item.zh) + '</strong><small>' + escape(item.en) + '<br>下次重点复习：' + entry.due + '</small></div><span class="status">' + (result.independent ? '首次独立写对' : result.today ? '穿插后写对' : '待复测') + '</span></div>'; }).join('') + '<p class="small">刚看过答案后写对不会增加“多日独立通过”次数。最后才订正的内容如果来不及穿插，就留到明天复测。</p>' + button('home', '完成，回首页') + '</section>';
   }
-  function sessionFitsUnit(saved, unit) {
-    if (!saved || saved.unit !== unit) return false;
+  function sessionFitsUnit(saved, unit, kind) {
+    if (!saved || saved.unit !== unit || (kind && saved.kind !== kind)) return false;
     const ids = [...(saved.queue || []).map(task => task.id), ...Object.keys(saved.results || {}), ...(saved.deferred || []), ...(saved.events || []).map(event => event.id).filter(Boolean)];
     if (saved.current) ids.push(saved.current.id);
-    return ids.every(id => INDEX[id] && INDEX[id].unit === unit);
+    return ids.every(id => INDEX[id] && INDEX[id].unit === unit && (!kind || INDEX[id].kind === kind));
   }
-  function dailySession() {
-    const current = state.sessions[date + '-u' + state.unit];
-    const legacy = state.sessions[date];
-    if (sessionFitsUnit(current, state.unit)) return current;
-    return sessionFitsUnit(legacy, state.unit) ? legacy : null;
+  function dailySession(kind = practiceKind) {
+    const saved = state.sessions[date + '-u' + state.unit + '-' + kind];
+    return sessionFitsUnit(saved, state.unit, kind) ? saved : null;
   }
   function recordEvent(kind, detail = {}) {
     if (!session) return;
@@ -279,7 +280,7 @@ const WordLearning = (() => {
         }).join('') + '</ol>' : '<p class="small">只有结果汇总，没有逐次作答记录。</p>') + '</section>';
       }).join('');
       const milestones = events.filter(event => ['start', 'pause'].includes(event.kind)).map(event => '<li>' + escape(time(event.at)) + ' ' + (event.kind === 'start' ? '从首页进入练习' : '暂停或返回首页') + '</li>').join('');
-      const label = sessionFitsUnit(saved, saved.unit) ? 'Unit ' + saved.unit + ' · 自主默写与间隔复习' : '旧版跨单元练习 · 记录保留';
+      const label = sessionFitsUnit(saved, saved.unit) ? 'Unit ' + saved.unit + ' · ' + (saved.kind === 'word' ? '单词与短语' : saved.kind === 'sentence' ? '句子' : '原综合练习') : '旧版跨单元练习 · 记录保留';
       return '<article class="card"><h3>' + label + '</h3>' + summary + detailSummary + '<details><summary>查看每题作答与订正过程</summary>' + (milestones ? '<ul>' + milestones + '</ul>' : '') + details + '</details></article>';
     }).join('') + '</section>').join('');
     return top('按日期查看练习') + '<h1>学习记录</h1><p class="intro">看看每天练了什么、哪里写错，以及怎样订正。</p>' + button('mastery', '查看逐词掌握与复习安排', false) + '<p class="small">详细过程从本次更新后开始保存；首次默写正确率只统计实际提交的首次答案，不包含点“还不会”的内容。</p>' + (cards || '<section class="card"><p>还没有练习记录。先从首页选择一个单元开始吧。</p></section>') + storageNotice() + button('home', '返回首页选择单元');
@@ -308,7 +309,7 @@ const WordLearning = (() => {
     const target = event.target.closest('[data-action]'); if (!target || target.disabled) return;
     const action = target.dataset.action;
     if (action !== 'listen') stopSpeech();
-    if (action === 'start') { if (chosenUnit) begin(); return; }
+    if (action === 'start-word' || action === 'start-sentence') { if (chosenUnit) begin(action === 'start-sentence' ? 'sentence' : 'word'); return; }
     if (action === 'home' || action === 'pause') { if (page === 'practice') recordEvent('pause'); page = 'home'; chosenUnit = null; save(); }
     else if (action === 'progress') page = 'progress';
     else if (action === 'mastery') page = 'mastery';
